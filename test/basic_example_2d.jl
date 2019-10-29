@@ -8,8 +8,13 @@ using UKrig
 # data grid and interpolation grid
 n₀ = 100 # grid evals
 n₁ = 100  # obs points
-x₀ = [[x,y] for x in range(-0.25, 1.25, length=n₀), y in range(-0.25, 1.25, length=n₀)]
-x₁ = [[rand(), rand()] for i=1:n₁]
+x₁ = rand(n₁)
+y₁ = rand(n₁)
+
+sidex₀ = range(-0.25, 1.25, length=n₀)
+sidey₀ = range(-0.25, 1.25, length=n₀)
+x₀ = sidex₀ .+ 0 .* sidey₀'
+y₀ = 0 .* sidex₀ .+ sidey₀'
 
 ##
 # set the simulation truth parameters
@@ -22,7 +27,8 @@ mₒ  = 2
 
 ##
 # simulate data
-Σ₁ = (σzₒ^2) .* Mnu.(UKrig.ℓ2_dist.(x₁,permutedims(x₁)) ./ ρₒ, νₒ)
+dmat = UKrig.distmat((x₁,y₁), (x₁,y₁))
+Σ₁ = (σzₒ^2) .* Mnu.(dmat ./ ρₒ, νₒ)
 L₁ = cholesky(Σ₁).L
 Z₁ = L₁ * randn(n₁)
 Y₁ = Z₁ # .+ fpx.(1:mₒ,x₁')' * βₒ
@@ -32,12 +38,12 @@ data = Y₁ + σεₒ .* randn(n₁)
 ##
 # do the interpolation
 krig1 = generate_Gnu_krig(
-	data, x₁, 
+	data, x₁, y₁, 
 	ν=νₒ, 
 	σg=σzₒ/ρₒ^νₒ, 
 	σε= 0.2*σεₒ,
 )
 
-interp = krig1.(x₀)
+interp = krig1.(x₀, y₀)
 interp |> matshow
 

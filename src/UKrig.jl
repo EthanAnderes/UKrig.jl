@@ -1,11 +1,12 @@
 module UKrig
 
 using SpecialFunctions: besselk, gamma
-import DynamicPolynomials: @polyvar, monomials
+import DynamicPolynomials: @polyvar, monomials, MonomialVector
 using FixedPolynomials
 using LinearAlgebra
 using Statistics
 using Random
+using StaticArrays
 
 export Mnu, Gnu, generate_Gnu_krig, generate_Mnu_krigY
 
@@ -34,79 +35,165 @@ end
 
 ℓ2_dist(x,y) = norm(x - y) 
 
+
+function distmat(xcols::NTuple{d,Vx}, ycols::NTuple{d,Vy}) where {d,T<:Real,Vx<:AbstractVector{T}, Vy<:AbstractVector{T}} 
+	nx = length(xcols[1])
+	ny = length(ycols[1])
+	D = fill(T(0), nx, ny)
+	for (x,y) in zip(xcols,ycols)
+		D .+= (x .- y').^2
+	end
+	return sqrt.(D)
+end
+
+
+################################################
+#
+# monomial closures
+#
+##############################################
+
+
+function _construct_monos_Fp(m::Int, ::Val{d}) where {d}
+    @polyvar x[1:d]
+    monos   = monomials(x,0:m)
+    poly_fp = System(Polynomial{Float64}.(monos))
+    cnf_sv  = JacobianConfig(poly_fp, SVector{d}(Vector{Float64}(undef,d)))
+    Fp(x::SVector{d,Q}) where {Q<:Real} = evaluate(poly_fp, x, cnf_sv)
+    Fp(x::Real...) = Fp(SVector(x))
+    Fp(x::NTuple{d,Q}) where {Q<:Real} = Fp(SVector(x))
+    return monos, Fp
+end
+
+
+function _generate_fpb(monos::MonomialVector{true}, b::Vector, ::Val{d}) where {d}
+    poly_fpb = Polynomial{Float64}.(dot(monos,b))
+    cnf_sv = config(poly_fpb, SVector{d}(Vector{Float64}(undef,d)))
+    fpb(x::SVector{d,Q}) where {Q<:Real} = evaluate(poly_fpb, x, cnf_sv)
+    fpb(x::Real...) = fpb(SVector(x))
+    fpb(x::NTuple{d,Q}) where {Q<:Real} = fpb(SVector(x))
+    return fpb
+end
+
+
+#######################################################
+#
+# Kriging closures
+#
+######################################################
+
 """
-`generate_Gnu_krig(;fdata, xdata, ν, σg, σε) -> (x::Array->krigY(x), x::Array->fp(x'), b, c)`
+
+```
+krig = generate_Gnu_krig(fdata::Vector{T}, xdata::Vector{T}...; ν=3/2, σg=1.0, σε=0.0)
+```
+
+Here is a short summary how `krig` can be called and vectorized where `n` denotes the number of spatial 
+interpolation points and `d` denotes the spatial dimension.
+
+```
+xvar = Tuple(rand(n) for i=1:d)
+xs_in_rows = hcat(xvar...)
+xzip   = zip(xvar...) 
+xvtupe = xzip |> collect 
+xsv    = [SVector(x) for x in zip(xvar...)] 
+xad    = [reduce(vcat,x) for x in zip(xvar...)] 
+
+xvar isa NTuple{d,Vector{Float64}}
+xs_in_rows isa Matrix{Float64}
+xzip isa Base.Iterators.Zip{NTuple{d,Vector{Float64}}}
+xvtupe isa Vector{NTuple{d,Float64}}
+xsv isa Vector{SVector{d,Float64}}
+xad isa Vector{Vector{Float64}}
+```
+
+Evaluation at a single spatial point
+``` 
+krig(xsv[1])
+krig(xad[1]...)
+```
+
+Evaluation at a collection of spatial points
+```
+krig.(xsv)
+krig.(SVector{d}.(xad))
+krig.(xvar...)
+krig.(xzip)
+krig.(xvtupe)
+krig.(eachcol(xs_in_rows)...)
+```
+
 """
-function generate_Gnu_krig(fdata::Vector{T}, xdata::Vector{P}; ν, σg, σε) where {Q<:Real,T<:Real,P<:AbstractArray{Q}}
+function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; ν=3/2, σg=1.0, σε=0.0) where {d,T<:Real}
 	m   = floor(Int, ν)
 	n   = length(fdata)
-	d   = length(xdata[1])
-	@assert n == length(xdata)
+	monos, Fp = _construct_monos_Fp(m, Val(d))
+	mp = length(monos)
+	
+	dmat = distmat(xdata, xdata)
+	G₁₁  = (σg^2) .* Gnu.(dmat, ν)
+	
+	FpVec = Fp.(xdata...)
+	F₁₁   = reduce(hcat,permutedims(FpVec))
 
-	@polyvar x[1:d]
-	monos = monomials(x,0:m)
-	fp    = Polynomial{T}.(monos) |> System
-	cnf   = JacobianConfig(fp, xdata[1])
-	mp = length(fp)
-
-	# f(x)  = mapslices(x;dims=[1]) do xᵢ
-	# 	evaluate(f,xᵢ,cfg)
-	# end
-	function f(x::P)
-		evaluate(fp,x,cnf)
-	end
-
-	n₁  = length(fdata)
-	G₁₁ = (σg^2) .* Gnu.(ℓ2_dist.(xdata, permutedims(xdata)), ν)
-	F₁₁ = reduce(hcat,f.(permutedims(xdata)))
 	Ξ   = [
-		G₁₁ .+ σε^2*I(n₁)  F₁₁'
-		F₁₁                zeros(mp, mp)
+		G₁₁ .+ σε^2*I(n)  F₁₁'
+		F₁₁               zeros(mp, mp)
 	]
 	cb = Ξ \ vcat(fdata, zeros(mp))
 	c  = cb[1:length(fdata)]
 	b  = cb[length(fdata)+1:end]
 
-	function krig(x::P)
-		K  = (σg^2) .* Gnu.(ℓ2_dist.(Ref(x), permutedims(xdata)), ν)
-		Fᵀ = f(x)'
-		return (K*c .+ Fᵀ*b)[1] 
+	fpb = _generate_fpb(monos, b, Val(d))
+
+	function krig(x::SVector{d,Q}) where Q<:Real
+		sqdist = fill(Q(0),n)
+		for i = 1:d
+			sqdist .+= (x[i] .- xdata[i]).^2
+		end
+		Kvec = (σg^2) .* Gnu.(sqrt.(sqdist), ν)
+		return dot(Kvec,c) + fpb(x)
 	end
-	function krig(x::Vector{P})
-		K  = (σg^2) .* Gnu.(ℓ2_dist.(x, permutedims(xdata)), ν)
-		Fᵀ = reduce(hcat,f.(permutedims(x)))'
-		return K*c .+ Fᵀ*b 
-	end
+    krig(x::Real...) = krig(SVector(x))
+    krig(x::NTuple{d,Q}) where {Q<:Real} = krig(SVector(x))
 
 	return krig
 end
 
-"""
-`generate_Mnu_krig(;fdata, xdata, ν, σg, σε) -> (x::Array->krigY(x), x::Array->fp(x'), b, c)`
-"""
-function generate_Mnu_krig(;fdata, xdata, ν, σ, ρ, σε)
-	
-	fpx_local(p,x) = x^(p-1)
-	
-	m   = floor(Int, ν)
-	n₁  = length(fdata)
 
-	M₁₁ = (σ^2) .* Mnu.(abs.(xdata .- xdata') ./ ρ, ν)
+function generate_Mnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; m=0, ν=3/2, σ=1.0, ρ=1.0, σε=0.0) where {d,T<:Real}
+	n   = length(fdata)
+	monos, Fp = _construct_monos_Fp(m, Val(d))
+	mp = length(monos)
+	
+	dmat = distmat(xdata, xdata)
+	M₁₁  = (σ^2) .* Mnu.(dmat ./ ρ, ν)
+	
+	FpVec = Fp.(xdata...)
+	F₁₁   = reduce(hcat,permutedims(FpVec))
+
 	Ξ   = [
-		M₁₁ .+ σε^2*I(n₁)  fpx_local.(1:m, xdata')'
-		fpx_local.(1:m, xdata')      zeros(m,m)
+		M₁₁ .+ σε^2*I(n)  F₁₁'
+		F₁₁               zeros(mp, mp)
 	]
-	cb = Ξ \ vcat(fdata, zeros(m))
+	cb = Ξ \ vcat(fdata, zeros(mp))
 	c  = cb[1:length(fdata)]
 	b  = cb[length(fdata)+1:end]
 
-	function krigY(x)
-		K  = (σ^2) .* Mnu.(abs.(x .- xdata') ./ ρ, ν)
-		Fᵀ = fpx_local.(1:m, x')'
-		return K*c .+ Fᵀ*b 
-	end
+	fpb = _generate_fpb(monos, b, Val(d))
 
-	return krigY, x->fpx_local.(1:m,x'), b, c
+	function krig(x::SVector{d,Q}) where Q<:Real
+		sqdist = fill(Q(0),n)
+		for i = 1:d
+			sqdist .+= (x[i] .- xdata[i]).^2
+		end
+		Kvec = (σ^2) .* Mnu.(sqrt.(sqdist) ./ ρ, ν)
+		return dot(Kvec,c) + fpb(x)
+	end
+    krig(x::Real...) = krig(SVector(x))
+    krig(x::NTuple{d,Q}) where {Q<:Real} = krig(SVector(x))
+
+	return krig
 end
 
 # TODO: add ability to include other spatial covariate functions

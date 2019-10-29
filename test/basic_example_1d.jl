@@ -8,8 +8,8 @@ using UKrig
 # data grid and interpolation grid
 n₀ = 500 # grid evals
 n₁ = 100  # obs points
-x₀ = [[x] for x in range(-1.0, 2.0, length=n₀)]
-x₁ = [[x] for x in sort(rand(n₁))]
+x₁ = sort(rand(n₁)) 
+x₀ = range(-1.0, 2.0, length=n₀) 
 
 ##
 # set the simulation truth parameters
@@ -32,20 +32,16 @@ data = Y₁ + σεₒ .* randn(n₁)
 ##
 # do the interpolation
 krig1 = generate_Gnu_krig(
-	data, x₁, 
+	data, x₁; 
 	ν=νₒ+2, 
 	σg=σzₒ/ρₒ^νₒ, 
 	σε= σεₒ,
 )
 
-
-colx₀ = reduce(vcat, x₀)
-colx₁ = reduce(vcat, x₁)
-
 ##
 # plot the krig prediction
 figure(figsize=(9,6)) 
-plot(colx₁, data, ".", label="data")
-plot(colx₀, krig1(x₀), label = "GkrigY2")
+plot(x₁, data, ".", label="data")
+plot(x₀, krig1.(x₀), label = "GkrigY2")
 legend()
 
