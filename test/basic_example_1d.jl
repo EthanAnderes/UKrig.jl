@@ -9,7 +9,7 @@ using UKrig
 n₀ = 500 # grid evals
 n₁ = 100  # obs points
 x₁ = sort(rand(n₁)) 
-x₀ = range(-1.0, 2.0, length=n₀) 
+x₀ = range(-0.1, 1.1, length=n₀) 
 
 ##
 # set the simulation truth parameters
@@ -26,16 +26,17 @@ mₒ  = 2
 L₁ = cholesky(Σ₁).L
 Z₁ = L₁ * randn(n₁)
 Y₁ = Z₁ # .+ fpx.(1:mₒ,x₁')' * βₒ
-data = Y₁ + σεₒ .* randn(n₁)
+data = Y₁ # + σεₒ .* randn(n₁)
 
 
 ##
 # do the interpolation
 krig1 = generate_Gnu_krig(
 	data, x₁; 
-	ν=νₒ+2, 
+	ν=1.5, 
 	σg=σzₒ/ρₒ^νₒ, 
-	σε= σεₒ,
+	#σε= σεₒ,
+	σε=0.0,
 )
 
 ##
