@@ -18,8 +18,10 @@ function Mnu(t, ν)::Float64
 end
 
 # the const on the principle irregular term
-scν(ν)       = - (2ν)^ν * gamma(ν + 1//2) * gamma(1-ν) / gamma(2ν+1) / sqrt(π)
-scν(ν::Int)  = - 2 * (-2ν)^ν * gamma(ν + 1//2) / gamma(ν) / gamma(2ν+3) / sqrt(π)
+# scν(ν)       = - (2ν)^ν * gamma(ν + 1//2) * gamma(1-ν) / gamma(2ν+1) / sqrt(π)
+# scν(ν::Int)  = - 2 * (-2ν)^ν * gamma(ν + 1//2) / gamma(ν) / gamma(2ν+3) / sqrt(π)
+scν(ν)       = (π / sin(ν*π)) * (- (ν/2)^ν / gamma(ν) / gamma(ν+1))
+scν(ν::Int)  = (2 * (-1)^ν)   * (- (ν/2)^ν / gamma(ν) / gamma(ν+1))
 
 function Gnu(t::T, ν::Int) where T<:Real
 	if t==0
