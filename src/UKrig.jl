@@ -18,21 +18,27 @@ function Mnu(t, ν)::Float64
 end
 
 # the const on the principle irregular term
-# scν(ν)       = - (2ν)^ν * gamma(ν + 1//2) * gamma(1-ν) / gamma(2ν+1) / sqrt(π)
-# scν(ν::Int)  = - 2 * (-2ν)^ν * gamma(ν + 1//2) / gamma(ν) / gamma(2ν+3) / sqrt(π)
-scν(ν)       = (π / sin(ν*π)) * (- (ν/2)^ν / gamma(ν) / gamma(ν+1))
-scν(ν::Int)  = (2 * (-1)^ν)   * (- (ν/2)^ν / gamma(ν) / gamma(ν+1))
 
-function Gnu(t::T, ν::Int) where T<:Real
-	if t==0
-		return T(0)
+scν(ν) = (-1)^(floor(Int,ν)+1)
+
+# function scν(ν) 
+# 	if floor(ν)==ν
+# 		return (2 * (-1)^ν)   * (- (ν/2)^ν / gamma(ν) / gamma(ν+1))
+# 	else
+# 		return (π / sin(ν*π)) * (- (ν/2)^ν / gamma(ν) / gamma(ν+1))
+# 	end
+# end
+
+function Gnu(t::A, ν::B) where {A<:Real, B<:Real}
+	C = promote_type(A,B)
+	if t==A(0)
+		return C(0)
 	end
-	return scν(ν) * t^(2ν) * log(t)
-end
-
-# Gnu(t::T, ν) where T<:Real = scν(ν) * t^(2ν)
-function Gnu(t::T, ν) where T<:Real 
-	return scν(ν) * t^(2ν)
+	if floor(ν)==ν
+		return C(scν(ν) * t^(2ν) * log(t))
+	else 
+		return C(scν(ν) * t^(2ν))
+	end
 end
 
 ℓ2_dist(x,y) = norm(x - y) 
@@ -87,7 +93,7 @@ end
 """
 
 ```
-krig = generate_Gnu_krig(fdata::Vector{T}, xdata::Vector{T}...; ν=3/2, σg=1.0, σε=0.0)
+krig = generate_Gnu_krig(fdata::Vector{T}, xdata::Vector{T}...; musr=0, nu=0.5, σg=1.0, σe=1.0)
 ```
 
 Here is a short summary how `krig` can be called and vectorized where `n` denotes the number of spatial 
@@ -126,8 +132,8 @@ krig.(eachcol(xs_in_rows)...)
 ```
 
 """
-function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; ν=3/2, σg=1.0, σε=0.0) where {d,T<:Real}
-	m   = floor(Int, ν)
+function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr=0, ν=0.5, σg=1.0, σe=1.0) where {d,T<:Real}
+	m   = max(musr, floor(Int, ν))
 	n   = length(fdata)
 	monos, Fp = _construct_monos_Fp(m, Val(d))
 	mp = length(monos)
@@ -139,7 +145,7 @@ function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; ν=3/2,
 	F₁₁   = reduce(hcat,permutedims(FpVec))
 
 	Ξ   = [
-		G₁₁ .+ σε^2*I(n)  F₁₁'
+		G₁₁ .+ σe^2*I(n)  F₁₁'
 		F₁₁               zeros(mp, mp)
 	]
 	cb = Ξ \ vcat(fdata, zeros(mp))
@@ -163,19 +169,20 @@ function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; ν=3/2,
 end
 
 
-function generate_Mnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; m=0, ν=3/2, σ=1.0, ρ=1.0, σε=0.0) where {d,T<:Real}
+function generate_Mnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr=0, ν=0.5, σs=1.0, ρ=1.0, σe=1.0) where {d,T<:Real}
+	m   = musr
 	n   = length(fdata)
 	monos, Fp = _construct_monos_Fp(m, Val(d))
 	mp = length(monos)
 	
 	dmat = distmat(xdata, xdata)
-	M₁₁  = (σ^2) .* Mnu.(dmat ./ ρ, ν)
+	M₁₁  = (σs^2) .* Mnu.(dmat ./ ρ, ν)
 	
 	FpVec = Fp.(xdata...)
 	F₁₁   = reduce(hcat,permutedims(FpVec))
 
 	Ξ   = [
-		M₁₁ .+ σε^2*I(n)  F₁₁'
+		M₁₁ .+ σe^2*I(n)  F₁₁'
 		F₁₁               zeros(mp, mp)
 	]
 	cb = Ξ \ vcat(fdata, zeros(mp))
@@ -189,7 +196,7 @@ function generate_Mnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; m=0, ν
 		for i = 1:d
 			sqdist .+= (x[i] .- xdata[i]).^2
 		end
-		Kvec = (σ^2) .* Mnu.(sqrt.(sqdist) ./ ρ, ν)
+		Kvec = (σs^2) .* Mnu.(sqrt.(sqdist) ./ ρ, ν)
 		return dot(Kvec,c) + fpb(x)
 	end
     krig(x::Real...) = krig(SVector(x))

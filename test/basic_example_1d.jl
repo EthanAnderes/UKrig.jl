@@ -30,19 +30,47 @@ data = Y₁ # + σεₒ .* randn(n₁)
 
 
 ##
-# do the interpolation
-krig1 = generate_Gnu_krig(
-	data, x₁; 
-	ν=1.5, 
-	σg=σzₒ/ρₒ^νₒ, 
-	#σε= σεₒ,
-	σε=0.0,
-)
-
-##
-# plot the krig prediction
+# do the interpolation, vary signal/noise
 figure(figsize=(9,6)) 
 plot(x₁, data, ".", label="data")
-plot(x₀, krig1.(x₀), label = "GkrigY2")
+for σg ∈ [1,5,10]
+	krig1 = generate_Gnu_krig(
+		data, x₁; 
+		ν=1.0,   # ≈ differentiability
+		σg=σg, # ≈ signal/noise ratio
+	)
+	plot(x₀, krig1.(x₀), label = "signal/noise = $σg")
+end
 legend()
+
+
+
+# do the interpolation, vary smoothness
+figure(figsize=(9,6)) 
+plot(x₁, data, ".", label="data")
+for ν ∈ [0.25, .5, 1.0, 1.25, 2.5]
+	krig1 = generate_Gnu_krig(
+		data, x₁; 
+		ν=ν,   # ≈ differentiability
+		σg=5, # ≈ signal/noise ratio
+	)
+	plot(x₀, krig1.(x₀), label = "nu = $ν")
+end
+legend()
+
+
+
+# do the interpolation, interpolate
+figure(figsize=(9,6)) 
+plot(x₁, data, ".", label="data")
+for ν ∈ [0.25, .5, 1.0, 1.25, 2.5]
+	krig1 = generate_Gnu_krig(
+		data, x₁; 
+		ν=ν,    # ≈ differentiability
+		σe=0.0, # interpolate
+	)
+	plot(x₀, krig1.(x₀), label = "nu = $ν")
+end
+legend()
+
 

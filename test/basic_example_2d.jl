@@ -11,8 +11,8 @@ n₁ = 100  # obs points
 x₁ = rand(n₁)
 y₁ = rand(n₁)
 
-sidex₀ = range(-0.25, 1.25, length=n₀)
-sidey₀ = range(-0.25, 1.25, length=n₀)
+sidex₀ = range(-0.1, 1.1, length=n₀)
+sidey₀ = range(-0.1, 1.1, length=n₀)
 x₀ = sidex₀ .+ 0 .* sidey₀'
 y₀ = 0 .* sidex₀ .+ sidey₀'
 
@@ -40,8 +40,8 @@ data = Y₁ + σεₒ .* randn(n₁)
 krig1 = generate_Gnu_krig(
 	data, x₁, y₁, 
 	ν=νₒ, 
-	σg=σzₒ/ρₒ^νₒ, 
-	σε= 0.2*σεₒ,
+	# σg= σzₒ/ρₒ^νₒ, 
+	σe= 0.01,
 )
 
 interp = krig1.(x₀, y₀)
