@@ -8,7 +8,9 @@ using Statistics
 using Random
 using StaticArrays
 
-export Mnu, Gnu, generate_Gnu_krig, generate_Mnu_krigY
+export Mnu, Gnu 
+export generate_Gnu_krig, generate_Mnu_krigY
+export generate_Gnu_loglike
 
 tν𝒦t(t,ν) = t^ν * besselk(ν, t)
 
@@ -62,6 +64,17 @@ end
 ##############################################
 
 
+
+function _generate_fpb(monos::MonomialVector{true}, b::Vector, ::Val{d}) where {d}
+    poly_fpb = Polynomial{Float64}.(dot(monos,b))
+    cnf_sv = config(poly_fpb, SVector{d}(Vector{Float64}(undef,d)))
+    fpb(x::SVector{d,Q}) where {Q<:Real} = evaluate(poly_fpb, x, cnf_sv)
+    fpb(x::Real...) = fpb(SVector(x))
+    fpb(x::NTuple{d,Q}) where {Q<:Real} = fpb(SVector(x))
+    return fpb
+end
+
+
 function _construct_monos_Fp(m::Int, ::Val{d}) where {d}
     @polyvar x[1:d]
     monos   = monomials(x,0:m)
@@ -74,21 +87,61 @@ function _construct_monos_Fp(m::Int, ::Val{d}) where {d}
 end
 
 
-function _generate_fpb(monos::MonomialVector{true}, b::Vector, ::Val{d}) where {d}
-    poly_fpb = Polynomial{Float64}.(dot(monos,b))
-    cnf_sv = config(poly_fpb, SVector{d}(Vector{Float64}(undef,d)))
-    fpb(x::SVector{d,Q}) where {Q<:Real} = evaluate(poly_fpb, x, cnf_sv)
-    fpb(x::Real...) = fpb(SVector(x))
-    fpb(x::NTuple{d,Q}) where {Q<:Real} = fpb(SVector(x))
-    return fpb
+function _construct_Fmat_monos(m::Int, xdata::Vararg{Vector{T},d}) where {d,T<:Real}
+	n   = length(xdata[1])	
+	monos, Fp = _construct_monos_Fp(m, Val(d))
+	FpVec  = Fp.(xdata...)
+	Fmat   = reduce(hcat,permutedims(FpVec))
+	return Fmat, monos
 end
-
 
 #######################################################
 #
 # Kriging closures
 #
 ######################################################
+
+
+function generate_Mnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr::Int=0, ν=0.5, σs=1.0, σe=1.0, ρ=1.0, ) where {d,T<:Real}
+	m   = musr
+	n   = length(fdata)
+
+	## spatial monomial covariates 
+	Fmat, monos = _construct_Fmat_monos(m, xdata...)
+	mp = length(monos)
+	
+	## generalized auto-cov (without the var mult σg²)
+	dmat = distmat(xdata, xdata)
+	Mmat  = Mnu.(dmat ./ ρ, ν)
+
+	## Solve for Krigin coeffs
+	Ξ   = [
+		(σs^2).*Mmat .+ σe^2*I(n)  Fmat'
+		Fmat                       zeros(mp, mp)
+	]
+	cb = Ξ \ vcat(fdata, zeros(mp))
+	c  = cb[1:length(fdata)]
+	b  = cb[length(fdata)+1:end]
+	fpb = _generate_fpb(monos, b, Val(d))
+
+	function krig(x::SVector{d,Q}) where Q<:Real
+		sqdist = fill(Q(0),n)
+		for i = 1:d
+			sqdist .+= (x[i] .- xdata[i]).^2
+		end
+		Kvec = (σs^2).*Mnu.(sqrt.(sqdist) ./ ρ, ν)
+		return dot(Kvec,c) + fpb(x)
+	end
+    krig(x::Real...) = krig(SVector(x))
+    krig(x::NTuple{d,Q}) where {Q<:Real} = krig(SVector(x))
+
+	return krig
+end
+
+
+
+
+
 
 """
 
@@ -132,78 +185,102 @@ krig.(eachcol(xs_in_rows)...)
 ```
 
 """
-function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr=0, ν=0.5, σg=1.0, σe=1.0) where {d,T<:Real}
+function generate_Gnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr::Int=0, σg=1.0, σe=1.0, ν=0.5) where {d,T<:Real}
 	m   = max(musr, floor(Int, ν))
 	n   = length(fdata)
-	monos, Fp = _construct_monos_Fp(m, Val(d))
+	
+	## spatial monomial covariates 
+	Fmat, monos = _construct_Fmat_monos(m, xdata...)
 	mp = length(monos)
 	
+	## generalized auto-cov (without the var mult σg²)
 	dmat = distmat(xdata, xdata)
-	G₁₁  = (σg^2) .* Gnu.(dmat, ν)
+	Gmat  = Gnu.(dmat, ν)
 	
-	FpVec = Fp.(xdata...)
-	F₁₁   = reduce(hcat,permutedims(FpVec))
-
+	## Solve for Krigin coeffs
 	Ξ   = [
-		G₁₁ .+ σe^2*I(n)  F₁₁'
-		F₁₁               zeros(mp, mp)
+		(σg^2).*Gmat .+ (σe^2).*I(n)  Fmat'
+		Fmat               zeros(mp, mp)
 	]
 	cb = Ξ \ vcat(fdata, zeros(mp))
 	c  = cb[1:length(fdata)]
 	b  = cb[length(fdata)+1:end]
-
 	fpb = _generate_fpb(monos, b, Val(d))
 
+	## Generate Krigin closure
 	function krig(x::SVector{d,Q}) where Q<:Real
 		sqdist = fill(Q(0),n)
 		for i = 1:d
 			sqdist .+= (x[i] .- xdata[i]).^2
 		end
-		Kvec = (σg^2) .* Gnu.(sqrt.(sqdist), ν)
+		Kvec = (σg^2).*Gnu.(sqrt.(sqdist), ν)
 		return dot(Kvec,c) + fpb(x)
 	end
     krig(x::Real...) = krig(SVector(x))
     krig(x::NTuple{d,Q}) where {Q<:Real} = krig(SVector(x))
 
+
 	return krig
 end
 
 
-function generate_Mnu_krig(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr=0, ν=0.5, σs=1.0, ρ=1.0, σe=1.0) where {d,T<:Real}
-	m   = musr
+
+#######################################################
+#
+# REML closures for each fixed ν
+#
+######################################################
+
+function generate_Gnu_loglike(fdata::Vector{T}, xdata::Vararg{Vector{T},d}; musr::Int=0, ν=0.5) where {d,T<:Real}
+	m   = max(musr, floor(Int, ν))
 	n   = length(fdata)
-	monos, Fp = _construct_monos_Fp(m, Val(d))
-	mp = length(monos)
 	
+	## spatial monomial covariates 
+	Fmat, = _construct_Fmat_monos(m, xdata...)
+	
+	## generalized auto-cov (without the var mult σg²)
 	dmat = distmat(xdata, xdata)
-	M₁₁  = (σs^2) .* Mnu.(dmat ./ ρ, ν)
+	Gmat  = Gnu.(dmat, ν)
 	
-	FpVec = Fp.(xdata...)
-	F₁₁   = reduce(hcat,permutedims(FpVec))
+	## Generate loglike closure, for further parameter tweaking
+    Mᵀ = nullspace(Fmat)
+    M  = transpose(Mᵀ)
+	Mfdata = M * fdata
 
-	Ξ   = [
-		M₁₁ .+ σe^2*I(n)  F₁₁'
-		F₁₁               zeros(mp, mp)
-	]
-	cb = Ξ \ vcat(fdata, zeros(mp))
-	c  = cb[1:length(fdata)]
-	b  = cb[length(fdata)+1:end]
+	function loglike_inv(σe, σg)
+		Σ = M * ((σg^2).*Gmat .+ (σe^2).*I(n)) * Mᵀ  |> Symmetric
+		Σ⁻¹Mfdata = Σ \ Mfdata
+		ll = - (Mfdata⋅Σ⁻¹Mfdata) / 2 - logdet(Σ) / 2
+		return ll
+	end 
 
-	fpb = _generate_fpb(monos, b, Val(d))
+	function loglike_chol(σe, σg)
+		Σ = M * ((σg^2).*Gmat .+ (σe^2).*I(n)) * Mᵀ  |> Symmetric
+		L = cholesky(Σ).L
+		L⁻¹Mfdata = L \ Mfdata
+		ll = - (L⁻¹Mfdata⋅L⁻¹Mfdata) / 2 - sum(log,diag(L))
+		return ll
+	end 
 
-	function krig(x::SVector{d,Q}) where Q<:Real
-		sqdist = fill(Q(0),n)
-		for i = 1:d
-			sqdist .+= (x[i] .- xdata[i]).^2
-		end
-		Kvec = (σs^2) .* Mnu.(sqrt.(sqdist) ./ ρ, ν)
-		return dot(Kvec,c) + fpb(x)
-	end
-    krig(x::Real...) = krig(SVector(x))
-    krig(x::NTuple{d,Q}) where {Q<:Real} = krig(SVector(x))
+	function wgrad_loglike_inv(σe, σg)
+		uΣe  = M * Mᵀ  |> Symmetric
+		uΣg  = M * Gmat * Mᵀ  |> Symmetric
+		Σ    = (σg^2) * uΣg + (σe^2) * uΣe
+		∂σeΣ = (2σe) * uΣe
+		∂σgΣ = (2σg) * uΣg
+		L = cholesky(Σ).L
+		L⁻¹Mfdata = L \ Mfdata
+		Σ⁻¹Mfdata = transpose(L) \ L⁻¹Mfdata
+		ll    = - dot(L⁻¹Mfdata, L⁻¹Mfdata) / 2 - sum(log,diag(L))
+		∂σell =  dot(Σ⁻¹Mfdata, ∂σeΣ * Σ⁻¹Mfdata) / 2 - tr(Σ \ ∂σeΣ) / 2
+		∂σgll =  dot(Σ⁻¹Mfdata, ∂σgΣ * Σ⁻¹Mfdata) / 2 - tr(Σ \ ∂σgΣ) / 2
+		return ll, ∂σell, ∂σgll
+	end 
 
-	return krig
+	return loglike_inv, loglike_chol, wgrad_loglike_inv
 end
+
+
 
 # TODO: add ability to include other spatial covariate functions
 
