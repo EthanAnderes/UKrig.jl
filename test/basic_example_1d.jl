@@ -38,19 +38,20 @@ data = Y₁ + σεₒ .* randn(n₁)
 musr = 2
 ν    = 1.25
 
-loglike_inv_nu1, loglike_chol_nu1, wgrad_loglike_inv_nu1 = generate_Gnu_loglike(
+loglike_inv_nu1, loglike_chol_nu1, wgrad_loglike_inv_nu1 = loglike_Gnu(
 	data, x₁;
 	musr=musr,  
 	ν=ν, # ≈ differentiability
 )
 
+#=
 loglike_inv_nu1(0.1, 2.0)
 loglike_chol_nu1(0.1, 2.0)
 wgrad_loglike_inv_nu1(0.1, 2.0)
-
 ϵ = 1e-7
 (loglike_inv_nu1(0.1+ϵ, 2.0) - loglike_inv_nu1(0.1-ϵ, 2.0))/(2ϵ)
 (loglike_inv_nu1(0.1, 2.0+ϵ) - loglike_inv_nu1(0.1, 2.0-ϵ))/(2ϵ)
+=#
 
 #LN_algm = [:LN_BOBYQA, :LN_COBYLA, :LN_PRAXIS, :LN_NELDERMEAD, :LN_SBPLX]
 #LD_algm = [:LD_MMA, :LD_SLSQP, :LD_LBFGS, :LD_TNEWTON]
@@ -79,9 +80,15 @@ opt3.maxtime = 10
 # opt1.ftol_abs = 0.1 * sqrt(length(data)) / sqrt(2)
 # opt2.ftol_abs = 0.1 * sqrt(length(data)) / sqrt(2)
 # opt3.ftol_abs = 0.1 * sqrt(length(data)) / sqrt(2)
-optf1, optx1, ret1 = optimize(opt1, Float64[.1,2])
-optf2, optx2, ret2 = optimize(opt2, Float64[.1,2])
-optf3, optx3, ret3 = optimize(opt3, Float64[.1,2])
+xinit1 = [0.1, 2.0]
+xinit2 = [0.1, 2.0]
+xinit3 = [0.1, 2.0]
+optf1, optx1, ret1 = optimize!(opt1, xinit1)
+optf2, optx2, ret2 = optimize!(opt2, xinit2)
+optf3, optx3, ret3 = optimize!(opt3, xinit3)
+@show sqrt(length(data))/√2
+
+
 
 σe = optx1[1]
 σg = optx1[2]
@@ -89,10 +96,9 @@ optf3, optx3, ret3 = optimize(opt3, Float64[.1,2])
 rng_σe = σe |> x->range(x - .05 * x, x + .05 * x, length=50)
 rng_σg = σg |> x->range(x - .15 * x, x + .15 * x, length=50)
 llmat = loglike_chol_nu1.(rng_σe,rng_σg')
-matshow(llmat)
+pcolor(rng_σe, rng_σg, llmat)
 
-
-krig1 = generate_Gnu_krig(
+krig1 = krig_Gnu(
 	data, x₁;
 	musr=musr,  
 	ν=ν, 
@@ -111,7 +117,7 @@ legend()
 figure(figsize=(9,6)) 
 plot(x₁, data, ".", label="data")
 for σg ∈ [1,5,10]
-	krig1 = generate_Gnu_krig(
+	krig1 = krig_Gnu(
 		data, x₁;
 		musr=2,  
 		ν=1.0,    # ≈ differentiability
@@ -128,7 +134,7 @@ legend()
 figure(figsize=(9,6)) 
 plot(x₁, data, ".", label="data")
 for ν ∈ [0.25, .5, 1.0, 1.25, 2.0]
-	krig1 = generate_Gnu_krig(
+	krig1 = krig_Gnu(
 		data, x₁;
 		musr=2, 
 		ν=ν,   # ≈ differentiability
@@ -145,7 +151,7 @@ legend()
 figure(figsize=(9,6)) 
 plot(x₁, data, ".", label="data")
 for ν ∈ [0.25, .5, 1.0]
-	krig1 = generate_Gnu_krig(
+	krig1 = krig_Gnu(
 		data, x₁;
 		musr=2,  
 		ν=ν,    # ≈ differentiability
