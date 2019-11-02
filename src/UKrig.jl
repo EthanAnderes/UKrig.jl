@@ -301,7 +301,11 @@ function loglike_Gnu_plus(fdata::Vector{T}, xdata::NTuple{d,Vector{T}}, mxdata::
 
 	function loglike_chol(σe, σg)
 		Σ = M * ((σg^2).*Gmat .+ (σe^2).*I(n)) * Mᵀ  |> Symmetric
-		L = cholesky(Σ).L
+		cholΣ = cholesky(Σ, check=false)
+		if !LinearAlgebra.issuccess(cholΣ)
+			return -Inf
+		end
+		L = cholΣ.L
 		L⁻¹Mfdata = L \ Mfdata
 		ll = - (L⁻¹Mfdata⋅L⁻¹Mfdata) / 2 - sum(log,diag(L))
 		return ll
@@ -348,7 +352,11 @@ function loglike_Mnu_plus(fdata::Vector{T}, xdata::NTuple{d,Vector{T}}, mxdata::
 	function loglike_chol(σe, σs, ρ)
 		Mmat  = Mnu.(dmat ./ ρ, ν)
 		Σ = M * ((σs^2).*Mmat .+ (σe^2).*I(n)) * Mᵀ  |> Symmetric
-		L = cholesky(Σ).L
+		cholΣ = cholesky(Σ, check=false)
+		if !LinearAlgebra.issuccess(cholΣ)
+			return -Inf
+		end
+		L = cholΣ.L
 		L⁻¹Mfdata = L \ Mfdata
 		ll = - (L⁻¹Mfdata⋅L⁻¹Mfdata) / 2 - sum(log,diag(L))
 		return ll
