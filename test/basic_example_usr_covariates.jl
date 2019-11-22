@@ -115,6 +115,7 @@ end
 
 figure(figsize=(9,6)) 
 plot(x₁, data, ".", label="data")
+plot(x₁, Y₁, label="truth")
 plot(x₀, krig.(x₀))
 legend()
 
